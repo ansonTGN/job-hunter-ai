@@ -1,0 +1,2 @@
+# Ejemplo usando el proveedor local (asegúrate de tener Ollama corriendo o cambiará al modo dummy si falla)
+cargo run -- --keywords "rust,backend" --local-endpoint "http://localhost:11434"

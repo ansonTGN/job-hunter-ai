@@ -1,0 +1,11 @@
+[package]
+name = "job-hunter-orchestrator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+job-hunter-core = { path = "../core" }
+crossbeam = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }

@@ -1,0 +1,7 @@
+[package]
+name = "job-hunter-llm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+job-hunter-core = { path = "../core" }

@@ -1,0 +1,76 @@
+[package]
+name = "job-hunter"
+version = "0.3.0"
+edition = "2021"
+
+[workspace]
+members = [
+    "crates/core",
+    "crates/agents",
+    "crates/orchestrator",
+    "crates/llm",
+    "crates/storage",
+    "crates/ui",
+]
+
+[workspace.dependencies]
+# --- CORE ---
+tokio = { version = "1.35", features = ["full"] }
+rkyv = { version = "0.7", features = ["validation"] }
+crossbeam = "0.8"
+rig-core = "0.2"
+reqwest = { version = "0.11", features = ["json", "blocking", "multipart"] }
+scraper = "0.18"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.4", features = ["derive"] }
+thiserror = "1.0"
+anyhow = "1.0"
+console = "0.15"
+url = "2.4"
+urlencoding = "2.1"
+async-trait = "0.1"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde", "rkyv"] }
+
+# --- WEB ---
+axum = { version = "0.7", features = ["ws", "multipart"] }
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# --- PDF PARSING ---
+lopdf = "0.32"
+
+# Dependencias locales
+job-hunter-core = { path = "crates/core" }
+job-hunter-agents = { path = "crates/agents" }
+job-hunter-orchestrator = { path = "crates/orchestrator" }
+job-hunter-ui = { path = "crates/ui" }
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+uuid.workspace = true
+
+job-hunter-core.workspace = true
+job-hunter-agents.workspace = true
+job-hunter-orchestrator.workspace = true
+job-hunter-ui.workspace = true
+
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+lopdf.workspace = true
+base64 = "0.22"
+
+
+

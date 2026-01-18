@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Job Hunter Crew</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+</head>
+
+<body>
+  <div class="topbar">
+    <div class="topbar__inner">
+      <div class="brand">
+        <div class="brand__mark">JH</div>
+        <div>
+          <div class="brand__title">Job Hunter Crew</div>
+          <div class="brand__subtitle">Scraping + IA + ranking de adecuación</div>
+        </div>
+      </div>
+
+      <div class="topbar__status">
+        <div class="pill">
+          <span class="dot dot--muted" id="backendDot"></span>
+          <span id="backendLabel">Backend: desconocido</span>
+        </div>
+        <div class="pill">
+          <span class="dot dot--muted" id="wsDot"></span>
+          <span id="wsLabel">WS: desconectado</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="tabs">
+        <button class="tab tab--active" data-tab="search">Búsqueda</button>
+        <button class="tab" data-tab="logs">Logs</button>
+        <button class="tab" data-tab="results">Resultados</button>
+      </div>
+
+      <div class="panel panel--compact">
+        <div class="panel__title">Acciones</div>
+        <div class="panel__body">
+          <div class="actions">
+            <button class="btn" id="btnStart">Iniciar</button>
+            <button class="btn btn--secondary" id="btnClear">Limpiar</button>
+            <button class="btn btn--secondary" id="btnPing">Ping backend</button>
+            <button class="btn btn--secondary" id="btnReconnectWs">Reconectar WS</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="summary">
+            <div class="summary__row"><span class="muted">Resultados</span><span id="summaryJobs" class="mono">0</span></div>
+            <div class="summary__row"><span class="muted">Logs</span><span id="summaryLogs" class="mono">0</span></div>
+            <div class="summary__row"><span class="muted">Último evento</span><span id="summaryEvent" class="mono">—</span></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- VIEW: SEARCH -->
+      <section class="view view--active" id="view-search">
+        <div class="card">
+          <div class="card__header">
+            <div>
+              <div class="card__title">Criterios de búsqueda</div>
+              <div class="card__subtitle">Define keywords, experiencia y adjunta CV si lo deseas.</div>
+            </div>
+            <div class="card__headerActions">
+              <button class="btn btn--secondary" id="btnRefreshModels">Actualizar modelos</button>
+            </div>
+          </div>
+
+          <div class="card__body">
+            <div class="grid2">
+              <div class="field">
+                <label>Keywords</label>
+                <input id="keywords" placeholder="rust, backend, security, llm, neo4j" />
+                <div class="hint">Separadas por coma. Se usarán para scraping y scoring.</div>
+              </div>
+
+              <div class="field">
+                <label>Experiencia</label>
+                <select id="experience">
+                  <option value="entry">Entry</option>
+                  <option value="junior">Junior</option>
+                  <option value="mid" selected>Mid</option>
+                  <option value="senior">Senior</option>
+                  <option value="lead">Lead</option>
+                  <option value="any">Any</option>
+                </select>
+                <div class="hint">Ajusta el perfil objetivo para filtrar y priorizar.</div>
+              </div>
+
+              <div class="field field--full">
+                <label>CV (PDF/TXT)</label>
+                <div class="fileRow">
+                  <input id="cvFile" type="file" accept=".pdf,.txt" />
+                  <button class="btn btn--secondary" id="btnUploadCv">Cargar y Analizar CV</button>
+                </div>
+                <!-- Estado de carga visual -->
+                <div class="hint" id="cvStatus">Selecciona un archivo y pulsa "Cargar".</div>
+              </div>
+
+              <div class="field field--full">
+                <label>CV (texto extraído)</label>
+                <textarea id="cvText" placeholder="El texto del CV aparecerá aquí..."></textarea>
+                
+                <!-- Área crítica para los chips de skills -->
+                <div id="cvKeywordsArea" style="display:none; margin-top: 10px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                  <div class="small muted" style="margin-bottom: 8px; font-weight:bold;">Sugerencias detectadas por IA (clic para añadir):</div>
+                  <div class="chips" id="cvKeywordsChips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="grid2">
+              <div class="field">
+                <label>Proveedor LLM</label>
+                <select id="llmProvider">
+                  <option value="local" selected>Ollama (Local)</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                </select>
+                <div class="hint">“Actualizar modelos” rellena los desplegables.</div>
+              </div>
+
+              <div class="field" id="fieldUseCase">
+                <label>Caso de uso</label>
+                <select id="llmUseCase">
+                  <option value="fast">fast</option>
+                  <option value="balanced" selected>balanced</option>
+                  <option value="deep">deep</option>
+                  <option value="long_context">long_context</option>
+                </select>
+                <div class="hint">Afecta al selector automático de modelos en cloud.</div>
+              </div>
+
+              <div class="field" id="fieldLocalEndpoint">
+                <label>Endpoint Ollama</label>
+                <input id="localEndpoint" value="http://localhost:11434" />
+              </div>
+
+              <div class="field" id="fieldLocalModel">
+                <label>Modelo Ollama</label>
+                <select id="localModel"></select>
+              </div>
+
+              <div class="field" id="fieldApiKey" style="display:none;">
+                <label>API Key (cloud)</label>
+                <input id="apiKey" type="password" placeholder="sk-..." />
+              </div>
+
+              <div class="field" id="fieldBaseUrl" style="display:none;">
+                <label>Base URL (opcional)</label>
+                <input id="cloudBaseUrl" placeholder="https://api.openai.com o https://api.anthropic.com" />
+                <div class="hint">Deja vacío para usar el default del proveedor.</div>
+              </div>
+
+              <div class="field field--full" id="fieldCloudModel" style="display:none;">
+                <label>Modelo (cloud)</label>
+                <select id="cloudModel">
+                  <option value="auto" selected>auto</option>
+                </select>
+                <div class="hint" id="cloudModelHint">Pulsa “Actualizar modelos”.</div>
+                <div class="hint" id="cloudError" style="display:none;"></div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- AQUÍ SE RENDERIZAN LOS SCRAPERS -->
+            <div class="field field--full">
+              <label>Fuentes (scrapers)</label>
+              <div class="sources" id="sources"></div>
+              <div class="hint">Activa/desactiva fuentes. (Proxy si tu backend lo soporta.)</div>
+            </div>
+          </div>
+
+          <div class="card__footer">
+            <div class="small muted">Los resultados llegarán por WebSocket y se renderizarán al vuelo.</div>
+            <div class="actions">
+              <button class="btn" id="btnStartBottom">Iniciar</button>
+              <button class="btn btn--secondary" id="btnClearBottom">Limpiar</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW: LOGS -->
+      <section class="view" id="view-logs">
+        <div class="card">
+          <div class="card__header">
+            <div>
+              <div class="card__title">Logs</div>
+              <div class="card__subtitle">Streaming del backend vía WebSocket.</div>
+            </div>
+          </div>
+          <div class="card__body">
+            <div class="logs" id="logs"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW: RESULTS -->
+      <section class="view" id="view-results">
+        <div class="card">
+          <div class="card__header">
+            <div>
+              <div class="card__title">Resultados</div>
+              <div class="card__subtitle">Cards actualizadas en vivo por URL (job_analyzed / job_found).</div>
+            </div>
+          </div>
+          <div class="card__body">
+            <div class="jobs" id="jobs">
+              <div class="emptyState" id="emptyState">Aún no hay resultados. Inicia una búsqueda para ver ofertas aquí.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>
+
+
+
+
