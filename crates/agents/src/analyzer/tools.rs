@@ -1,11 +1,14 @@
 use regex::RegexBuilder;
 use tracing::warn;
 
+/// Busca fragmentos de texto relevantes usando Regex case-insensitive.
+/// Útil para RLM (Recursive Logic Module) cuando el agente busca "salary", "remote", etc.
 pub fn find_snippets(text: &str, keyword: &str, _window_hint: usize) -> String {
     if keyword.trim().is_empty() {
         return "Consulta vacía.".to_string();
     }
 
+    // Construir regex case-insensitive
     let pattern = format!(r"(?i){}", regex::escape(keyword));
     let re = match RegexBuilder::new(&pattern).build() {
         Ok(r) => r,
@@ -15,30 +18,19 @@ pub fn find_snippets(text: &str, keyword: &str, _window_hint: usize) -> String {
     let mut hits = Vec::new();
     let lines: Vec<&str> = text.lines().collect();
     
-    let mut i = 0;
-    while i < lines.len() {
-        if re.is_match(lines[i]) {
-            let start = i.saturating_sub(1);
-            let end = (i + 2).min(lines.len());
-            
-            let block = lines[start..end]
-                .iter()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<&str>>()
-                .join(" ");
-            
-            if !block.is_empty() {
-                let is_duplicate = hits.last().map(|last: &String| last.contains(&block) || block.contains(last)).unwrap_or(false);
-                if !is_duplicate {
-                    hits.push(format!("• \"...{}...\"", block));
+    // Iteramos buscando coincidencias
+    // Se extrae la línea completa donde aparece la keyword
+    for line in lines {
+        if re.is_match(line) {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                // Evitamos duplicados exactos consecutivos
+                if hits.last() != Some(&trimmed) {
+                    hits.push(trimmed);
                 }
             }
-            i = end; 
-        } else {
-            i += 1;
         }
-        
+        // Limitamos a 6 coincidencias para no saturar el contexto del LLM
         if hits.len() >= 6 { break; }
     }
 
@@ -46,9 +38,11 @@ pub fn find_snippets(text: &str, keyword: &str, _window_hint: usize) -> String {
         return "No se encontraron coincidencias relevantes.".to_string();
     }
 
-    hits.join("\n")
+    // Formateamos como lista
+    hits.iter().map(|s| format!("• \"{}\"", s)).collect::<Vec<_>>().join("\n")
 }
 
+/// Trunca un string a un número máximo de caracteres de forma segura (UTF-8).
 pub fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
@@ -58,20 +52,25 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
+/// Intenta parsear la respuesta del LLM como JSON, aplicando varias estrategias de limpieza y reparación.
 pub fn parse_llm_json(text: &str) -> Result<serde_json::Value, String> {
-    // 1. Intento directo
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) {
-        return Ok(v);
-    }
+    // 1. Limpieza de bloques de código Markdown (común en Llama 3 / GPT-4)
+    // Ej: ```json { ... } ``` -> { ... }
+    let clean_text = text
+        .replace("```json", "")
+        .replace("```", "")
+        .trim()
+        .to_string();
 
-    // 2. Extracción de bloque
-    let candidate = extract_json_block(text).unwrap_or_else(|| text.to_string());
+    // 2. Extracción precisa del bloque JSON más externo
+    // Busca el primer '{' y el último '}'
+    let candidate = extract_json_block(&clean_text).unwrap_or_else(|| clean_text.clone());
     
-    // 3. Intento parseo del candidato
+    // 3. Intento directo de parseo
     match serde_json::from_str::<serde_json::Value>(&candidate) {
         Ok(v) => Ok(v),
         Err(e) => {
-            // 4. Si falla, intentamos sanitizar caracteres de escape
+            // 4. Si falla, intentamos sanitizar caracteres de escape (ej: \n reales dentro de strings)
             let sanitized = sanitize_json_string(&candidate);
             match serde_json::from_str::<serde_json::Value>(&sanitized) {
                 Ok(v) => {
@@ -79,7 +78,7 @@ pub fn parse_llm_json(text: &str) -> Result<serde_json::Value, String> {
                     Ok(v)
                 },
                 Err(e_san) => {
-                    // 5. Si el error es EOF (corte abrupto), intentamos cerrar el JSON
+                    // 5. Si el error sugiere EOF (corte abrupto), intentamos cerrar estructuras
                     if e_san.to_string().contains("EOF") {
                         let closed = try_close_json(&sanitized);
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&closed) {
@@ -88,24 +87,66 @@ pub fn parse_llm_json(text: &str) -> Result<serde_json::Value, String> {
                         }
                     }
                     
-                    Err(format!("JSON malformado: {}", e))
+                    // Si todo falla, devolvemos el error original del candidato más limpio
+                    Err(format!("JSON malformado: {}. Inicio respuesta: {:.50}...", e, candidate))
                 }
             }
         }
     }
 }
 
+/// Extrae el substring entre el primer '{' y el último '}'.
 fn extract_json_block(text: &str) -> Option<String> {
     let start = text.find('{')?;
-    // Buscamos el último cierre, si no existe (EOF), tomamos hasta el final
-    let end = text.rfind('}').unwrap_or(text.len()); 
+    let end = text.rfind('}')?; // Usamos rfind para buscar desde el final
+    
     if start >= end { 
-        return Some(text[start..].to_string()); 
+        return None; 
     } 
+    
+    // Incluimos el '}' final en el slice
     Some(text[start..=end].to_string())
 }
 
-/// Intenta cerrar estructuras JSON abiertas si el LLM se quedó a medias
+/// Arregla escapes inválidos comunes que los LLMs generan.
+/// Ej: Caracteres de control reales (tabs, newlines) dentro de strings JSON.
+fn sanitize_json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                if let Some(&next) = chars.peek() {
+                    match next {
+                        // Escapes válidos en JSON
+                        '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u' => {
+                            out.push('\\'); 
+                        },
+                        _ => {
+                            // Escape inválido (ej: path de windows C:\Users), escapamos el backslash
+                            out.push('\\');
+                            out.push('\\');
+                        }
+                    }
+                } else {
+                    // Backslash al final del string
+                    out.push('\\');
+                    out.push('\\');
+                }
+            },
+            // Caracteres de control reales rompen el parser de JSON estándar
+            // Los reemplazamos por su versión escapada
+            '\n' => { out.push('\\'); out.push('n'); },
+            '\r' => { }, // Ignorar carriage return
+            '\t' => { out.push('\\'); out.push('t'); },
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Intenta cerrar estructuras JSON abiertas si el LLM se quedó sin tokens (timeout/length limit).
 fn try_close_json(s: &str) -> String {
     let mut out = s.to_string();
     
@@ -115,6 +156,7 @@ fn try_close_json(s: &str) -> String {
     }
     
     // Balance de llaves y corchetes simplificado
+    // Contamos cuántos faltan por cerrar
     let open_braces = out.chars().filter(|&c| c == '{').count();
     let close_braces = out.chars().filter(|&c| c == '}').count();
     for _ in 0..open_braces.saturating_sub(close_braces) {
@@ -127,44 +169,10 @@ fn try_close_json(s: &str) -> String {
         out.push(']');
     }
     
-    // Asegurar cierre del objeto raíz si quedó colgando
+    // Asegurar cierre del objeto raíz si quedó colgando (doble check)
     if !out.trim_end().ends_with('}') {
          out.push('}');
     }
 
-    out
-}
-
-/// Arregla escapes inválidos (ej: \s en regex o paths de windows)
-fn sanitize_json_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' => {
-                if let Some(&next) = chars.peek() {
-                    match next {
-                        '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u' => {
-                            out.push('\\'); 
-                        },
-                        _ => {
-                            // Escape inválido, escapamos el backslash
-                            out.push('\\');
-                            out.push('\\');
-                        }
-                    }
-                } else {
-                    out.push('\\');
-                    out.push('\\');
-                }
-            },
-            // Caracteres de control reales rompen JSON, los escapamos
-            '\n' => { out.push('\\'); out.push('n'); },
-            '\r' => { }, 
-            '\t' => { out.push('\\'); out.push('t'); },
-            _ => out.push(c),
-        }
-    }
     out
 }

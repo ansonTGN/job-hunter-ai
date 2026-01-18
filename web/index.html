@@ -43,9 +43,12 @@
         <div class="panel__title">Acciones</div>
         <div class="panel__body">
           <div class="actions">
-            <button class="btn" id="btnStart">Iniciar</button>
+            <button class="btn" id="btnStart">▶ Iniciar</button>
             <button class="btn btn--secondary" id="btnClear">Limpiar</button>
-            <button class="btn btn--secondary" id="btnPing">Ping backend</button>
+            <!-- NUEVO BOTÓN EXPORTAR -->
+            <button class="btn btn--secondary" id="btnExport">💾 Exportar CSV</button>
+            
+            <button class="btn btn--secondary" id="btnPing">Ping</button>
             <button class="btn btn--secondary" id="btnReconnectWs">Reconectar WS</button>
           </div>
 
@@ -109,10 +112,29 @@
                 <label>CV (texto extraído)</label>
                 <textarea id="cvText" placeholder="El texto del CV aparecerá aquí..."></textarea>
                 
-                <!-- Área crítica para los chips de skills -->
                 <div id="cvKeywordsArea" style="display:none; margin-top: 10px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
                   <div class="small muted" style="margin-bottom: 8px; font-weight:bold;">Sugerencias detectadas por IA (clic para añadir):</div>
                   <div class="chips" id="cvKeywordsChips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- CONFIGURACIÓN DE EJECUCIÓN (NUEVO) -->
+            <div class="field field--full">
+              <label>Configuración de Ejecución (Scrapers)</label>
+              <div class="grid2" style="background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px; border: 1px solid var(--border);">
+                <div class="field">
+                  <label>Delay entre Peticiones (ms)</label>
+                  <input type="number" id="globalDelay" value="1200" min="500" step="100" />
+                  <div class="hint">Tiempo de espera para evitar bloqueos (Anti-Bot). Valor recomendado: 1200ms.</div>
+                </div>
+                <div class="field">
+                  <label>Comportamiento</label>
+                  <div class="hint" style="margin-top: 6px;">
+                    El backend intentará obtener hasta 15 ofertas por fuente. Aumentar el delay reduce el riesgo de bloqueo pero hace la búsqueda más lenta.
+                  </div>
                 </div>
               </div>
             </div>
@@ -174,7 +196,6 @@
 
             <div class="divider"></div>
 
-            <!-- AQUÍ SE RENDERIZAN LOS SCRAPERS -->
             <div class="field field--full">
               <label>Fuentes (scrapers)</label>
               <div class="sources" id="sources"></div>
@@ -185,7 +206,7 @@
           <div class="card__footer">
             <div class="small muted">Los resultados llegarán por WebSocket y se renderizarán al vuelo.</div>
             <div class="actions">
-              <button class="btn" id="btnStartBottom">Iniciar</button>
+              <button class="btn" id="btnStartBottom">▶ Iniciar</button>
               <button class="btn btn--secondary" id="btnClearBottom">Limpiar</button>
             </div>
           </div>
@@ -214,6 +235,9 @@
             <div>
               <div class="card__title">Resultados</div>
               <div class="card__subtitle">Cards actualizadas en vivo por URL (job_analyzed / job_found).</div>
+            </div>
+            <div class="card__headerActions">
+                <button class="btn btn--secondary" onclick="document.getElementById('btnExport').click()">💾 Exportar CSV</button>
             </div>
           </div>
           <div class="card__body">

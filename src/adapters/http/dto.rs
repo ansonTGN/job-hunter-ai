@@ -94,11 +94,24 @@ pub enum ApiExperienceLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiJobSource {
+    // Clásicos
     Remoteok,
     Wwr,
     Arbeitnow,
     Himalayas,
     Jobspresso,
+
+    // --- NUEVOS SCRAPERS ---
+    Remotive,
+    Jobicy,
+    FindWork,
+    WorkingNomads,
+    VueJobs,
+    CryptoJobs,
+    RemoteCo,
+    DevItJobs,
+    PythonOrg,
+    GolangProjects,
 }
 
 //
@@ -161,7 +174,6 @@ pub struct LlmCloudV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CvExtractResponseV1 {
     pub text: String,
-    // --- NUEVO CAMPO AGREGADO ---
     #[serde(default)]
     pub keywords: Vec<String>,
 }

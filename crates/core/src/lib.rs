@@ -20,7 +20,7 @@ pub struct SourceSettings {
 pub struct SearchCriteria {
     pub keywords: Vec<String>,
     pub experience_level: ExperienceLevel,
-    pub sources_config: Vec<SourceSettings>, // Configuración individual
+    pub sources_config: Vec<SourceSettings>,
     pub user_cv: Option<String>,
 }
 
@@ -54,13 +54,24 @@ pub enum JobType {
 )]
 #[archive(check_bytes)]
 pub enum JobSource {
-    LinkedIn,
-    Indeed,
+    // Clásicos
     RemoteOk,
     WeWorkRemotely,
-    Arbeitnow,  // Nueva
-    Himalayas,  // Nueva
-    Jobspresso, // Nueva
+    Arbeitnow,
+    Himalayas,
+    Jobspresso,
+    // Nuevos
+    Remotive,
+    Jobicy,
+    FindWork,
+    WorkingNomads,
+    VueJobs,
+    CryptoJobs,
+    RemoteCo,
+    DevItJobs,
+    PythonOrg,
+    GolangProjects,
+    // Fallback
     Custom(String),
 }
 

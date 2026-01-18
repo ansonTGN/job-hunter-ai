@@ -41,9 +41,10 @@ impl AnalyzerAgent {
     pub fn new_local(endpoint: String, model: String) -> Self {
         Self {
             llm: LlmProvider::Local { endpoint, model },
-            http: reqwest::Client::builder().timeout(Duration::from_secs(300)).build().unwrap(),
+            // --- CAMBIO CRÍTICO: Timeout 900s (15 min) para aguantar colas de inferencia ---
+            http: reqwest::Client::builder().timeout(Duration::from_secs(900)).build().unwrap(),
             ws_tx: None, 
-            max_html_chars: 4_500, 
+            max_html_chars: 4_000, 
         }
     }
 
@@ -64,31 +65,23 @@ impl AnalyzerAgent {
         }
     }
 
-    // --- CORREGIDO: Usamos Result<..., AgentError> en lugar de anyhow ---
     pub async fn extract_keywords_from_cv(&self, cv_text: &str) -> Result<Vec<String>, AgentError> {
         let snippet = truncate_chars(cv_text, 6000); 
 
         let prompt = format!(
             r#"ACT AS: Senior Tech Recruiter.
-TASK: Extract key technical skills, roles, and domain knowledge from the following CV.
-OUTPUT: JSON ONLY. A flat list of strings. Limit to the top 15-20 most relevant terms.
+TASK: Extract key technical skills from CV.
+OUTPUT: JSON ONLY. `{{ "keywords": ["rust", "python", ...] }}`.
+NO INTRO. NO OUTRO.
 
 CV TEXT:
-{snippet}
-
-JSON SCHEMA:
-{{
-  "keywords": ["rust", "backend", "system architecture", ...]
-}}
-"#,
+{snippet}"#,
             snippet = snippet
         );
 
         self.emit_log("info", "🧠 [Analyzer] Extrayendo keywords del CV con IA...");
         
         let response = self.call_llm(&prompt).await?;
-        
-        // Mapeamos el error de parseo a AgentError::Analysis
         let json = parse_llm_json(&response)
             .map_err(|e| AgentError::Analysis(format!("Error parsing LLM JSON: {}", e)))?;
         
@@ -103,7 +96,6 @@ JSON SCHEMA:
         Ok(keywords)
     }
 
-    /// Router central: Decide si usar RLM (Recursivo) o Lineal
     async fn analyze_job(&self, raw: &RawJobPosting, criteria: &SearchCriteria) -> Result<AnalyzedJobPosting, AgentError> {
         let use_recursive = match &self.llm {
             LlmProvider::OpenAI { use_case, .. } | LlmProvider::Anthropic { use_case, .. } => 
@@ -115,33 +107,33 @@ JSON SCHEMA:
             return self.analyze_job_recursive(raw, criteria).await;
         }
 
-        // --- LÓGICA LINEAL CLÁSICA ---
         let html_snip = truncate_chars(&raw.html_content, self.max_html_chars);
-        let cv = criteria.user_cv.as_deref().map(|s| truncate_chars(s, 4000)).unwrap_or_else(|| "No CV".to_string());
+        let cv = criteria.user_cv.as_deref().map(|s| truncate_chars(s, 3000)).unwrap_or_else(|| "No CV".to_string());
         
+        // Prompt reforzado para evitar texto basura fuera del JSON
         let prompt = format!(
-            r#"ACT AS: Senior Tech Recruiter.
-TASK: Analyze the Job vs Candidate Match.
-FORMAT: JSON ONLY. No markdown. No introductory text.
+            r#"Role: Recruiter.
+Task: Evaluate Candidate vs Job.
+Output: Strict JSON. No text outside braces.
 
-CANDIDATE CV:
+Candidate:
 {cv}
 
-JOB POSTING (Excerpt):
+Job (Snippet):
 {html}
 
-REQUIRED JSON SCHEMA:
+JSON Structure:
 {{
-  "title": "Job Title",
-  "company_name": "Company",
-  "description": "Brief summary",
-  "salary_normalized": null,
+  "title": "Clean Job Title",
+  "company_name": "Company Name",
+  "match_score": 0.0 to 1.0,
+  "match_reasons": ["reason1", "reason2"],
   "red_flags": ["flag1"],
   "skills_analysis": {{ "matching": ["skill1"], "missing": ["skill2"] }},
-  "match_score": 0.5,
-  "match_reasons": ["reason1"]
-}}
-"#,
+  "description": "Short summary",
+  "location": "City or Remote",
+  "is_remote": true/false
+}}"#,
             cv = cv,
             html = html_snip
         );
@@ -150,7 +142,7 @@ REQUIRED JSON SCHEMA:
         let text = self.call_llm(&prompt).await?;
         
         let json = parse_llm_json(&text).map_err(|e| {
-            warn!("JSON Error: {}. Response start: {:.200}...", e, text);
+            warn!("JSON Error: {}. Resp: {:.100}...", e, text);
             AgentError::Analysis(e)
         })?;
         

@@ -9,9 +9,9 @@ use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+// Importamos la fábrica de scrapers y los agentes necesarios
 use job_hunter_agents::{
-    AnalyzerAgent, ArbeitnowAgent, EnricherAgent, HimalayasAgent, JobspressoAgent, RemoteOkAgent,
-    UseCase, WwrAgent,
+    get_all_scrapers, AnalyzerAgent, EnricherAgent, UseCase
 };
 use job_hunter_core::*;
 use job_hunter_orchestrator::Orchestrator;
@@ -121,18 +121,21 @@ async fn run_search_from_v1(
 ) -> anyhow::Result<()> {
     let (mut orch, mut result_rx) = Orchestrator::new();
 
-    // Agentes
+    // 1. REGISTRO AUTOMÁTICO DE SCRAPERS
+    // Usamos la fábrica centralizada para cargar todos los scrapers disponibles
+    let all_scrapers = get_all_scrapers();
+    for agent in all_scrapers {
+        orch.register_agent(agent);
+    }
+
+    // 2. Agentes de IA y Enriquecimiento
     let analyzer = build_analyzer_agent(&req.llm, state.ws_tx.clone())?;
     let enricher = Arc::new(EnricherAgent::new());
 
-    orch.register_agent(Arc::new(RemoteOkAgent::new()));
-    orch.register_agent(Arc::new(ArbeitnowAgent::new()));
-    orch.register_agent(Arc::new(HimalayasAgent::new()));
-    orch.register_agent(Arc::new(WwrAgent::new()));
-    orch.register_agent(Arc::new(JobspressoAgent::new()));
     orch.register_agent(analyzer);
     orch.register_agent(enricher);
 
+    // 3. Mapeo de Criteria
     let criteria = SearchCriteria {
         keywords: req.criteria.keywords.clone(),
         experience_level: map_experience(req.criteria.experience_level.clone()),
@@ -157,13 +160,13 @@ async fn run_search_from_v1(
         format!("run_id={} arrancando búsqueda", run_id),
     );
 
-    // API nueva del orquestador
+    // 4. Ejecución del Orquestador
     orch.start_search(criteria).await?;
 
-    // run() consume self, así que lo ejecutamos en background y esperamos result_rx
+    // run() consume self, así que lo ejecutamos en background
     let run_task = tokio::spawn(async move { orch.run().await });
 
-    // Recogida final
+    // 5. Recogida de resultados
     if let Some(results) = result_rx.recv().await {
         send_log(
             &state,
@@ -180,11 +183,11 @@ async fn run_search_from_v1(
         send_log(
             &state,
             "warn",
-            format!("run_id={} finalizado sin resultados (o timeout en scraping)", run_id),
+            format!("run_id={} finalizado sin resultados (o timeout)", run_id),
         );
     }
 
-    // Asegura que el task del orquestador finalice (si run() devuelve)
+    // Asegura que el task del orquestador finalice
     let _ = run_task.await;
 
     Ok(())
@@ -269,13 +272,26 @@ fn map_experience(level: ApiExperienceLevel) -> ExperienceLevel {
     }
 }
 
+// Mapeo exhaustivo de fuentes para incluir los nuevos scrapers
 fn map_source(s: ApiJobSource) -> JobSource {
     match s {
+        // Clásicos
         ApiJobSource::Remoteok => JobSource::RemoteOk,
         ApiJobSource::Arbeitnow => JobSource::Arbeitnow,
         ApiJobSource::Himalayas => JobSource::Himalayas,
         ApiJobSource::Wwr => JobSource::WeWorkRemotely,
         ApiJobSource::Jobspresso => JobSource::Jobspresso,
+        // Nuevos
+        ApiJobSource::Remotive => JobSource::Remotive,
+        ApiJobSource::Jobicy => JobSource::Jobicy,
+        ApiJobSource::FindWork => JobSource::FindWork,
+        ApiJobSource::WorkingNomads => JobSource::WorkingNomads,
+        ApiJobSource::VueJobs => JobSource::VueJobs,
+        ApiJobSource::CryptoJobs => JobSource::CryptoJobs,
+        ApiJobSource::RemoteCo => JobSource::RemoteCo,
+        ApiJobSource::DevItJobs => JobSource::DevItJobs,
+        ApiJobSource::PythonOrg => JobSource::PythonOrg,
+        ApiJobSource::GolangProjects => JobSource::GolangProjects,
     }
 }
 
@@ -362,12 +378,11 @@ pub async fn extract_cv_v1(
         }
     }
 
-    // --- CORRECCIÓN CRÍTICA CV ---
+    // --- MANEJO DE TEXTO VACÍO (NO RETORNAR ERROR 400) ---
     if file_text.trim().is_empty() {
-        warn!("No se pudo extraer texto del archivo subido. Enviando placeholder para no romper el flujo.");
-        file_text = "No se pudo leer el contenido del archivo automáticamente (posible PDF escaneado). Por favor, copia y pega el texto de tu CV aquí.".to_string();
+        warn!("No se pudo extraer texto. El archivo puede estar vacío o ser una imagen. Devolviendo placeholder.");
+        file_text = "No se pudo extraer texto automáticamente. Por favor copia y pega tu CV aquí.".to_string();
     }
-    // -----------------------------
 
     // Construir agente temporal con la config recibida para extraer skills
     let agent = match provider.as_str() {
@@ -388,11 +403,11 @@ pub async fn extract_cv_v1(
     let keywords = match agent_arc.extract_keywords_from_cv(&file_text).await {
         Ok(kws) => kws,
         Err(e) => {
-            warn!("Fallo extracción keywords LLM (probablemente texto vacío o error LLM): {}", e);
+            warn!("Fallo extracción keywords LLM: {}", e);
             send_log(
                 &state,
                 "warn",
-                format!("No se pudieron extraer keywords con IA (puedes añadirlas manual): {}", e),
+                format!("No se pudieron extraer keywords con IA: {}", e),
             );
             vec![]
         }
@@ -573,12 +588,11 @@ pub async fn start_search_legacy(
     tokio::spawn(async move {
         let (mut orch, mut result_rx) = Orchestrator::new();
 
-        // Agents
-        orch.register_agent(Arc::new(RemoteOkAgent::new()));
-        orch.register_agent(Arc::new(ArbeitnowAgent::new()));
-        orch.register_agent(Arc::new(HimalayasAgent::new()));
-        orch.register_agent(Arc::new(WwrAgent::new()));
-        orch.register_agent(Arc::new(JobspressoAgent::new()));
+        // Carga automática de TODOS los scrapers (Legacy también se beneficia)
+        let all_scrapers = get_all_scrapers();
+        for agent in all_scrapers {
+            orch.register_agent(agent);
+        }
 
         // LLM config (legacy)
         let llm = req.get("llm").cloned().unwrap_or(serde_json::json!({}));
@@ -660,6 +674,9 @@ pub async fn start_search_legacy(
             _ => ExperienceLevel::Any,
         };
 
+        // Note: Legacy source config parsing is simplified here.
+        // It will only enable classic sources unless updated explicitly.
+        // For new sources, users should use V1 API.
         let sources_config: Vec<SourceSettings> = criteria
             .get("sources_config")
             .and_then(|v| v.as_array())
@@ -685,6 +702,7 @@ pub async fn start_search_legacy(
                     "himalayas" => JobSource::Himalayas,
                     "wwr" => JobSource::WeWorkRemotely,
                     "jobspresso" => JobSource::Jobspresso,
+                     // Legacy mapping fallback
                     _ => return None,
                 };
 

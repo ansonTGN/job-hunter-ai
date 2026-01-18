@@ -27,9 +27,9 @@ export function connectWs() {
 
       if (msg.type === "log") {
         addLog(msg.payload?.level || "info", msg.payload?.msg || "");
-        setLastEvent(msg.payload?.msg || "log");
-
+        
       } else if (msg.type === "job_analyzed") {
+        // Aquí es donde estaba fallando antes
         upsertJob(msg.payload, "analyzed");
         setLastEvent("job_analyzed");
 
@@ -40,15 +40,17 @@ export function connectWs() {
       } else if (msg.type === "status") {
         const p = String(msg.payload || "");
         addLog("info", `Estado: ${p}`);
-        setLastEvent(`status:${p}`);
-        if (p.toLowerCase().includes("started")) setRunStatus("running");
-        if (p.toLowerCase().includes("finished") || p.toLowerCase().includes("completed")) setRunStatus("idle");
+        if (p.includes("started")) setRunStatus("running");
+        if (p.includes("done") || p.includes("error")) setRunStatus("idle");
+        
       } else {
-        setLastEvent("mensaje");
+        // Mensajes desconocidos
+        console.log("Mensaje desconocido:", msg);
       }
-    } catch {
-      addLog("warn", String(ev.data));
-      setLastEvent("raw");
+    } catch (e) {
+      console.error("Error procesando WS msg:", e);
+      // Mostramos el error real en el log para depurar
+      addLog("error", `UI Error: ${e.message}`);
     }
   };
 
