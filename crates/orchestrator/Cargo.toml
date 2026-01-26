@@ -9,3 +9,4 @@ crossbeam = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
+futures = "0.3"  # <--- AÑADIR ESTA LÍNEA

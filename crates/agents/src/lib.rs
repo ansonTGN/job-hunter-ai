@@ -15,22 +15,21 @@ use crate::scrapers::{
     jobspresso::JobspressoAgent,
     remoteok::RemoteOkAgent,
     weworkremotely::WwrAgent,
-    extra_scrapers::*, // Importa todos los nuevos
+    extra_scrapers::*, 
+    // Si quieres usar el dynamic, descomenta abajo:
+    // dynamic::DynamicScraperAgent,
 };
 
-/// 🏭 FÁBRICA CENTRAL DE SCRAPERS
-/// Devuelve una lista con TODOS los agentes de scraping disponibles.
-/// Si añades un nuevo scraper, regístralo aquí.
+// Necesitas añadir esto al mod scrapers/mod.rs también: pub mod dynamic;
+
 pub fn get_all_scrapers() -> Vec<Arc<dyn Agent>> {
     vec![
-        // Scrapers Clásicos
         Arc::new(RemoteOkAgent::new()),
         Arc::new(ArbeitnowAgent::new()),
         Arc::new(HimalayasAgent::new()),
         Arc::new(WwrAgent::new()),
         Arc::new(JobspressoAgent::new()),
 
-        // Scrapers Extra (Nuevos)
         Arc::new(RemotiveAgent::new()),
         Arc::new(JobicyAgent::new()),
         Arc::new(FindWorkAgent::new()),
@@ -41,5 +40,7 @@ pub fn get_all_scrapers() -> Vec<Arc<dyn Agent>> {
         Arc::new(GolangProjectsAgent::new()),
         Arc::new(PythonOrgAgent::new()),
         Arc::new(RemoteCoAgent::new()),
+        
+        // Arc::new(DynamicScraperAgent::new()), 
     ]
 }

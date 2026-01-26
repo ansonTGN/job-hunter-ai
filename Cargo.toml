@@ -72,5 +72,8 @@ tower-http.workspace = true
 lopdf.workspace = true
 base64 = "0.22"
 
+headless_chrome = "1.0"  # Para Point 1: Scraping dinámico
+governor = "0.6"         # Para Point 1: Rate Limiting
+nonzero_ext = "0.3"      # Utilidad para governor
 
 

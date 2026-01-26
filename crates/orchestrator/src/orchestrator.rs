@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
+use std::panic::AssertUnwindSafe;
+use futures::FutureExt; 
 
 use job_hunter_core::{Agent, AgentMessage, AnalyzedJobPosting, SearchCriteria};
 
@@ -48,7 +50,6 @@ impl Orchestrator {
 
         if scrapers.is_empty() {
             warn!("⚠️ No hay scrapers registrados. La búsqueda no hará nada.");
-            // Emitimos fin “vacío” para que la UI no quede esperando eternamente.
             let _ = self.result_tx.send(vec![]).await;
             let _ = self
                 .message_tx
@@ -69,9 +70,10 @@ impl Orchestrator {
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        info!("🚀 Orquestador iniciado y esperando mensajes...");
+        info!("🚀 Orquestador (con Supervisión) iniciado...");
 
         while let Some((target, msg)) = self.message_rx.recv().await {
+            
             if let AgentMessage::Shutdown = msg {
                 break;
             }
@@ -82,20 +84,50 @@ impl Orchestrator {
                 let res_tx = self.result_tx.clone();
                 let criteria_ref = self.current_criteria.clone();
 
+                // --- SUPERVISOR TASK WRAPPER ---
                 tokio::spawn(async move {
-                    debug!("📬 Procesando mensaje para agente: {}", agent.name());
-                    match agent.process(msg).await {
-                        Ok(response) => {
-                            Self::route(response, tx, res_tx, criteria_ref).await;
+                    // Usamos AssertUnwindSafe para capturar pánicos (crashes de Rust)
+                    let result = AssertUnwindSafe(async {
+                        debug!("🔎 [Supervisor] Ejecutando agente: {}", agent.name());
+                        agent.process(msg).await
+                    }).catch_unwind().await;
+
+                    match result {
+                        // El agente terminó "bien" (Ok o Err controlado)
+                        Ok(process_result) => {
+                            match process_result {
+                                Ok(response) => {
+                                    Self::route(response, tx, res_tx, criteria_ref).await;
+                                }
+                                Err(e) => {
+                                    error!("⚠️ [Supervisor] Agente '{}' reportó error: {}", agent.name(), e);
+                                    // Notificamos error interno pero no cerramos el sistema completo
+                                    let _ = tx.send(("__orchestrator__".into(), AgentMessage::Error(e.to_string()))).await;
+                                }
+                            }
+                        },
+                        // El agente entró en PÁNICO (Crash real)
+                        Err(panic_cause) => {
+                            let cause_str = if let Some(s) = panic_cause.downcast_ref::<&str>() {
+                                s.to_string()
+                            } else {
+                                "Unknown panic".to_string()
+                            };
+                            error!("🚨 [SUPERVISOR] CRITICAL: Agente '{}' CRASHED! Causa: {}", agent.name(), cause_str);
+                            let _ = tx.send(("__orchestrator__".into(), AgentMessage::Error(format!("PANIC: {}", cause_str)))).await;
                         }
-                        Err(e) => error!("❌ Error en agente {}: {}", agent.name(), e),
                     }
                 });
+            } else if target == "__orchestrator__" {
+                if let AgentMessage::Error(e) = msg {
+                    warn!("⚙️ [Orchestrator Logic] Error recibido de subsistema: {}", e);
+                }
             } else {
-                warn!("❓ Mensaje dirigido a agente desconocido: {}", target);
+                warn!("❓ Mensaje a agente desconocido: {}", target);
             }
         }
-
+        
+        info!("🛑 Orquestador detenido.");
         Ok(())
     }
 
@@ -107,60 +139,23 @@ impl Orchestrator {
     ) {
         match msg {
             AgentMessage::RawJobsScraped(jobs) => {
-                info!("📡 Scraper finalizado: {} ofertas encontradas.", jobs.len());
-
-                // --- CORRECCIÓN CRÍTICA ---
-                // Si jobs está vacío (scraper desactivado o sin resultados),
-                // NO enviamos Shutdown. Simplemente retornamos para permitir
-                // que otros scrapers sigan procesando y enviando sus ofertas.
-                if jobs.is_empty() {
-                    warn!("⚠️ Un scraper finalizó con 0 resultados (o estaba desactivado). Continuando...");
-                    return; 
-                }
-                // --------------------------
-
+                info!("📡 Scraper finalizado. {} ofertas encontradas.", jobs.len());
+                // Si jobs viene vacío, NO matamos el flujo, permitimos que otros scrapers sigan.
+                if jobs.is_empty() { return; }
+                
                 if let Some(c) = criteria {
-                    info!("🧠 Enviando {} ofertas al Analyzer (IA)...", jobs.len());
-                    let _ = tx
-                        .send(("analyzer".into(), AgentMessage::AnalyzeJobs(jobs, c)))
-                        .await;
-                } else {
-                    warn!("⚠️ No hay criteria en memoria. Cerrando run.");
-                    let _ = res_tx.send(vec![]).await;
-                    let _ = tx
-                        .send(("__orchestrator__".into(), AgentMessage::Shutdown))
-                        .await;
+                    let _ = tx.send(("analyzer".into(), AgentMessage::AnalyzeJobs(jobs, c))).await;
                 }
-            }
+            },
             AgentMessage::JobsAnalyzed(jobs) => {
-                info!(
-                    "✨ Análisis de IA completado para {} ofertas. Enriqueciendo...",
-                    jobs.len()
-                );
-                let _ = tx
-                    .send(("enricher".into(), AgentMessage::JobsAnalyzed(jobs)))
-                    .await;
+                info!("✨ Análisis completado para {} ofertas.", jobs.len());
+                let _ = tx.send(("enricher".into(), AgentMessage::JobsAnalyzed(jobs))).await;
             }
             AgentMessage::JobsEnriched(jobs) => {
-                info!(
-                    "✅ Proceso completado. Enviando {} resultados a la UI.",
-                    jobs.len()
-                );
+                info!("✅ Proceso completado. Enviando {} resultados.", jobs.len());
                 let _ = res_tx.send(jobs).await;
-                // Aquí SÍ cerramos, porque el enriquecedor es el último paso
-                // de un lote de ofertas exitoso.
-                let _ = tx
-                    .send(("__orchestrator__".into(), AgentMessage::Shutdown))
-                    .await;
-            }
-            AgentMessage::Error(e) => {
-                error!("❌ Error recibido en ruta: {}", e);
-                // En caso de error explícito, quizás sí queramos cerrar o solo loguear.
-                // Dejamos shutdown por seguridad ante fallos fatales.
-                let _ = res_tx.send(vec![]).await;
-                let _ = tx
-                    .send(("__orchestrator__".into(), AgentMessage::Shutdown))
-                    .await;
+                // Señal de finalización del ciclo
+                let _ = tx.send(("__orchestrator__".into(), AgentMessage::Shutdown)).await;
             }
             _ => {}
         }

@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # --- Job Hunter App ---
+  job-hunter:
+    build: .
+    container_name: job-hunter-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - JOB_HUNTER_BIND=0.0.0.0
+      - JOB_HUNTER_PORT=3000
+      # Si usas OpenAI/Anthropic, descomenta y pon tus claves aquí
+      # - OPENAI_API_KEY=sk-...
+      # - ANTHROPIC_API_KEY=sk-...
+    volumes:
+      # (Opcional) Si quieres editar el frontend sin recompilar:
+      # - ./web:/app/web
+      # Persistencia de logs u otros datos si implementas BBDD en el futuro
+      - job_hunter_data:/app/data
+    #depends_on:
+    #  - ollama
+
+  # --- Local LLM Service (Ollama) ---
+  #ollama:
+  #  image: ollama/ollama:latest
+  #  container_name: job-hunter-ollama
+  #  restart: unless-stopped
+  #  ports:
+  #    - "11434:11434"
+  #  volumes:
+      # Persistir los modelos descargados (llama3, mistral, etc.)
+   #   - ollama_models:/root/.ollama
+
+volumes:
+  job_hunter_data:
+  #ollama_models:

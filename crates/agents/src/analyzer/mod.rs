@@ -8,6 +8,7 @@ use job_hunter_core::*;
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tracing::warn;
+use std::sync::atomic::AtomicUsize; // <--- Importación necesaria para el contador
 
 pub use self::types::{LlmProvider, UseCase, LlmAnalysis};
 use self::tools::{truncate_chars, parse_llm_json};
@@ -17,6 +18,7 @@ pub struct AnalyzerAgent {
     http: reqwest::Client,
     ws_tx: Option<broadcast::Sender<String>>,
     max_html_chars: usize,
+    pub usage_count: AtomicUsize, // <--- Campo añadido para tracking de uso/coste
 }
 
 impl AnalyzerAgent {
@@ -26,6 +28,7 @@ impl AnalyzerAgent {
             http: reqwest::Client::builder().timeout(Duration::from_secs(90)).build().unwrap(),
             ws_tx: None, 
             max_html_chars: 12_000,
+            usage_count: AtomicUsize::new(0), // <--- Inicialización
         }
     }
 
@@ -35,16 +38,18 @@ impl AnalyzerAgent {
             http: reqwest::Client::builder().timeout(Duration::from_secs(90)).build().unwrap(),
             ws_tx: None, 
             max_html_chars: 12_000,
+            usage_count: AtomicUsize::new(0), // <--- Inicialización
         }
     }
 
     pub fn new_local(endpoint: String, model: String) -> Self {
         Self {
             llm: LlmProvider::Local { endpoint, model },
-            // --- CAMBIO CRÍTICO: Timeout 900s (15 min) para aguantar colas de inferencia ---
+            // Timeout largo para modelos locales lentos
             http: reqwest::Client::builder().timeout(Duration::from_secs(900)).build().unwrap(),
             ws_tx: None, 
             max_html_chars: 4_000, 
+            usage_count: AtomicUsize::new(0), // <--- Inicialización
         }
     }
 
@@ -104,17 +109,17 @@ CV TEXT:
         };
 
         if use_recursive {
+            // Requiere que rlm.rs use self.call_llm() que ahora ya existe
             return self.analyze_job_recursive(raw, criteria).await;
         }
 
         let html_snip = truncate_chars(&raw.html_content, self.max_html_chars);
         let cv = criteria.user_cv.as_deref().map(|s| truncate_chars(s, 3000)).unwrap_or_else(|| "No CV".to_string());
         
-        // Prompt reforzado para evitar texto basura fuera del JSON
         let prompt = format!(
             r#"Role: Recruiter.
 Task: Evaluate Candidate vs Job.
-Output: Strict JSON. No text outside braces.
+Output: Strict JSON.
 
 Candidate:
 {cv}

@@ -17,4 +17,8 @@ rig-core = { workspace = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
 tokio = { workspace = true }
-regex = "1.10" # <-- NUEVO: Para la herramienta 'grep' del RLM
+regex = "1.10"
+headless_chrome = "1.0"  # Scraping dinámico
+governor = "0.6"         # Rate Limiting
+nonzero_ext = "0.3"      # Utilidad para governor
+anyhow = "1.0"
