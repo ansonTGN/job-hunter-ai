@@ -1,5 +1,7 @@
 # --- Stage 1: Builder ---
-FROM rust:1.75-slim-bookworm as builder
+# CAMBIO IMPORTANTE: Actualizamos de 1.75 a 1-slim-bookworm (versión actual estable)
+# para que soporte el Cargo.lock versión 4.
+FROM rust:1-slim-bookworm as builder
 
 WORKDIR /usr/src/app
 
@@ -14,9 +16,7 @@ RUN apt-get update && apt-get install -y \
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
-# Truco para cachear dependencias: crear un main dummy, compilar y luego borrar
-# (Opcional, pero recomendado para builds más rápidos en CI/CD)
-# Por simplicidad en este ejemplo, copiamos todo y compilamos:
+# Copiar todo el código fuente
 COPY . .
 
 # Compilar en modo release
@@ -45,7 +45,7 @@ COPY --from=builder /usr/src/app/web /app/web
 
 # Variables de entorno por defecto
 ENV JOB_HUNTER_BIND=0.0.0.0
-# PORT será sobreescrito por Render, pero definimos un default
+# PORT será sobreescrito por Render
 ENV PORT=3000 
 ENV JOB_HUNTER_WEB_DIR=/app/web
 ENV RUST_LOG=info
