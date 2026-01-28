@@ -1,4 +1,3 @@
---- START OF FILE src/main.rs ---
 mod adapters;
 
 use std::{net::SocketAddr, sync::Arc};
