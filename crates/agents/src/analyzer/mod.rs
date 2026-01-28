@@ -7,18 +7,29 @@ use async_trait::async_trait;
 use job_hunter_core::*;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tracing::warn;
-use std::sync::atomic::AtomicUsize; // <--- Importación necesaria para el contador
+use tracing::{info, warn, error};
+use std::sync::atomic::AtomicUsize;
 
 pub use self::types::{LlmProvider, UseCase, LlmAnalysis};
 use self::tools::{truncate_chars, parse_llm_json};
+
+/// Lista de keywords técnicas para el Fallback (Extracción de emergencia)
+const COMMON_TECH_KEYWORDS: &[&str] = &[
+    "rust", "python", "javascript", "typescript", "react", "vue", "angular", "node", "java", "c++", "c#", "go", "golang",
+    "docker", "kubernetes", "aws", "azure", "gcp", "linux", "sql", "postgresql", "mysql", "mongodb", "redis", "elasticsearch",
+    "git", "ci/cd", "jenkins", "github actions", "gitlab", "terraform", "ansible", "graphql", "rest api", "grpc",
+    "microservices", "distributed systems", "machine learning", "ai", "llm", "nlp", "opencv", "pytorch", "tensorflow",
+    "pandas", "numpy", "scikit-learn", "data science", "etl", "big data", "hadoop", "spark", "kafka", "rabbitmq",
+    "blockchain", "solidity", "web3", "security", "cybersecurity", "penetration testing", "devops", "sre",
+    "agile", "scrum", "kanban", "jira", "tdd", "bdd", "testing", "selenium", "cypress", "playwright"
+];
 
 pub struct AnalyzerAgent {
     llm: LlmProvider,
     http: reqwest::Client,
     ws_tx: Option<broadcast::Sender<String>>,
     max_html_chars: usize,
-    pub usage_count: AtomicUsize, // <--- Campo añadido para tracking de uso/coste
+    pub usage_count: AtomicUsize,
 }
 
 impl AnalyzerAgent {
@@ -28,7 +39,7 @@ impl AnalyzerAgent {
             http: reqwest::Client::builder().timeout(Duration::from_secs(90)).build().unwrap(),
             ws_tx: None, 
             max_html_chars: 12_000,
-            usage_count: AtomicUsize::new(0), // <--- Inicialización
+            usage_count: AtomicUsize::new(0),
         }
     }
 
@@ -38,7 +49,7 @@ impl AnalyzerAgent {
             http: reqwest::Client::builder().timeout(Duration::from_secs(90)).build().unwrap(),
             ws_tx: None, 
             max_html_chars: 12_000,
-            usage_count: AtomicUsize::new(0), // <--- Inicialización
+            usage_count: AtomicUsize::new(0),
         }
     }
 
@@ -49,7 +60,7 @@ impl AnalyzerAgent {
             http: reqwest::Client::builder().timeout(Duration::from_secs(900)).build().unwrap(),
             ws_tx: None, 
             max_html_chars: 4_000, 
-            usage_count: AtomicUsize::new(0), // <--- Inicialización
+            usage_count: AtomicUsize::new(0),
         }
     }
 
@@ -70,14 +81,31 @@ impl AnalyzerAgent {
         }
     }
 
+    /// Método principal para extraer keywords del CV.
+    /// Utiliza una estrategia híbrida: Intenta LLM primero, si falla, usa Regex/Diccionario.
     pub async fn extract_keywords_from_cv(&self, cv_text: &str) -> Result<Vec<String>, AgentError> {
-        let snippet = truncate_chars(cv_text, 6000); 
+        // 1. Intentar extracción inteligente vía LLM
+        match self.extract_keywords_llm(cv_text).await {
+            Ok(kws) if !kws.is_empty() => Ok(kws),
+            Ok(_) | Err(_) => {
+                // 2. Si el LLM devuelve lista vacía o error, activar Fallback
+                self.emit_log("warn", "⚠️ Falló extracción IA. Usando extracción estática de emergencia.");
+                warn!("Activando fallback regex para keywords del CV.");
+                Ok(self.extract_keywords_regex(cv_text))
+            }
+        }
+    }
+
+    /// Lógica privada de llamada al LLM para keywords
+    async fn extract_keywords_llm(&self, cv_text: &str) -> Result<Vec<String>, AgentError> {
+        let snippet = truncate_chars(cv_text, 4000); 
 
         let prompt = format!(
             r#"ACT AS: Senior Tech Recruiter.
-TASK: Extract key technical skills from CV.
-OUTPUT: JSON ONLY. `{{ "keywords": ["rust", "python", ...] }}`.
-NO INTRO. NO OUTRO.
+TASK: Analyze this CV snippet and extract key technical skills (programming languages, frameworks, tools, cloud).
+OUTPUT FORMAT: Strict JSON object with a single key "keywords".
+EXAMPLE: {{ "keywords": ["Rust", "Python", "Docker", "AWS"] }}
+NO INTRO. NO MARKDOWN. NO OUTRO.
 
 CV TEXT:
 {snippet}"#,
@@ -86,7 +114,10 @@ CV TEXT:
 
         self.emit_log("info", "🧠 [Analyzer] Extrayendo keywords del CV con IA...");
         
+        // Llamada al proveedor configurado
         let response = self.call_llm(&prompt).await?;
+        
+        // Parseo robusto
         let json = parse_llm_json(&response)
             .map_err(|e| AgentError::Analysis(format!("Error parsing LLM JSON: {}", e)))?;
         
@@ -98,7 +129,41 @@ CV TEXT:
             .filter_map(|v| v.as_str().map(|s| s.to_string()))
             .collect();
 
+        if keywords.is_empty() {
+            return Err(AgentError::Analysis("El LLM devolvió una lista vacía".into()));
+        }
+
         Ok(keywords)
+    }
+
+    /// Extracción determinista basada en diccionario (Fallback)
+    fn extract_keywords_regex(&self, text: &str) -> Vec<String> {
+        let text_lower = text.to_lowercase();
+        let mut found = Vec::new();
+
+        for &kw in COMMON_TECH_KEYWORDS {
+            // Buscamos la keyword en el texto.
+            // Nota: Para mayor precisión se podría usar Regex con boundaries \b, 
+            // pero contains es más rápido y suficiente para un fallback de emergencia.
+            if text_lower.contains(kw) {
+                // Capitalizamos la primera letra para que se vea bien en la UI
+                let cap = kw.chars().next().unwrap().to_uppercase().to_string() + &kw[1..];
+                found.push(cap);
+            }
+        }
+        
+        // Eliminar duplicados y ordenar
+        found.sort();
+        found.dedup();
+        
+        if found.is_empty() {
+            // Si incluso el diccionario falla, devolvemos genéricos si hay texto
+            if !text.is_empty() {
+                return vec!["Communication".to_string(), "Teamwork".to_string()];
+            }
+        }
+        
+        found
     }
 
     async fn analyze_job(&self, raw: &RawJobPosting, criteria: &SearchCriteria) -> Result<AnalyzedJobPosting, AgentError> {
