@@ -3,17 +3,23 @@ FROM rust:1.75-slim-bookworm as builder
 
 WORKDIR /usr/src/app
 
-# Instalar dependencias de compilación (OpenSSL es crítico para reqwest)
+# Instalar dependencias de compilación
+# pkg-config y libssl-dev son necesarios para compilar crates que usan red (reqwest)
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copiar todo el código fuente (respetando .dockerignore)
+# Copiar archivos de configuración primero para cachear dependencias
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Truco para cachear dependencias: crear un main dummy, compilar y luego borrar
+# (Opcional, pero recomendado para builds más rápidos en CI/CD)
+# Por simplicidad en este ejemplo, copiamos todo y compilamos:
 COPY . .
 
 # Compilar en modo release
-# Esto puede tardar unos minutos dependiendo de las dependencias
 RUN cargo build --release
 
 # --- Stage 2: Runtime ---
@@ -22,28 +28,27 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 # Instalar dependencias de ejecución
-# - ca-certificates: Para hacer peticiones HTTPS (scrapers)
-# - libssl3: Librería de encriptación requerida por el binario compilado
-# - chromium: (Opcional) Si descomentas el DynamicScraperAgent en el futuro, necesitarás esto.
+# - ca-certificates: Para HTTPS
+# - libssl3: Librería crypto
+# - chromium: Necesario si activas el DynamicScraperAgent (headless chrome)
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
+    chromium \
     && rm -rf /var/lib/apt/lists/*
 
-# Copiar el binario desde la etapa de compilación
+# Copiar el binario compilado
 COPY --from=builder /usr/src/app/target/release/job-hunter /app/job-hunter
 
-# Copiar la carpeta del frontend (indispensable para la UI)
+# Copiar el frontend (La UI)
 COPY --from=builder /usr/src/app/web /app/web
 
 # Variables de entorno por defecto
 ENV JOB_HUNTER_BIND=0.0.0.0
-ENV JOB_HUNTER_PORT=3000
+# PORT será sobreescrito por Render, pero definimos un default
+ENV PORT=3000 
 ENV JOB_HUNTER_WEB_DIR=/app/web
 ENV RUST_LOG=info
 
-# Exponer el puerto
-EXPOSE 3000
-
-# Ejecutar la aplicación
+# Render espera que escuchemos en el puerto definido por $PORT
 CMD ["./job-hunter"]

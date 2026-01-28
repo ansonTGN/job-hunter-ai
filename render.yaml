@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: job-hunter-ai
+    env: docker
+    plan: free
+    region: frankfurt # O la región más cercana (oregon, ohio, singapore, etc)
+    dockerContext: .
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: JOB_HUNTER_BIND
+        value: 0.0.0.0
+      - key: JOB_HUNTER_WEB_DIR
+        value: /app/web
+      - key: RUST_LOG
+        value: info
+      # OPCIONAL: Si quieres definir tus API Keys aquí (no recomendado commitear secretos)
+      # - key: OPENAI_API_KEY
+      #   sync: false
+      # - key: ANTHROPIC_API_KEY
+      #   sync: false
