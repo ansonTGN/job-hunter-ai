@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use job_hunter_core::*;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tracing::{info, warn, error};
+use tracing::warn; // CORREGIDO: Eliminados info y error que no se usaban
 use std::sync::atomic::AtomicUsize;
 
 pub use self::types::{LlmProvider, UseCase, LlmAnalysis};
@@ -142,11 +142,8 @@ CV TEXT:
         let mut found = Vec::new();
 
         for &kw in COMMON_TECH_KEYWORDS {
-            // Buscamos la keyword en el texto.
-            // Nota: Para mayor precisión se podría usar Regex con boundaries \b, 
-            // pero contains es más rápido y suficiente para un fallback de emergencia.
             if text_lower.contains(kw) {
-                // Capitalizamos la primera letra para que se vea bien en la UI
+                // Capitalizamos la primera letra
                 let cap = kw.chars().next().unwrap().to_uppercase().to_string() + &kw[1..];
                 found.push(cap);
             }
@@ -174,7 +171,6 @@ CV TEXT:
         };
 
         if use_recursive {
-            // Requiere que rlm.rs use self.call_llm() que ahora ya existe
             return self.analyze_job_recursive(raw, criteria).await;
         }
 
