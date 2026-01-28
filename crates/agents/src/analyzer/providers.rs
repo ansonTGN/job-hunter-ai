@@ -78,13 +78,20 @@ impl AnalyzerAgent {
         self.check_budget()?;
         
         let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
-        let m = model.clone().unwrap_or_else(|| {
-            match use_case {
-                UseCase::Fast => "gpt-4o-mini".to_string(),
-                UseCase::Deep => "gpt-4o".to_string(),
-                _ => "gpt-4o-mini".to_string(), 
-            }
-        });
+        
+        // CORRECCIÓN PRINCIPAL:
+        // Filtramos si el modelo es "auto", cadena vacía o None.
+        let m = model.as_deref()
+            .filter(|s| *s != "auto" && !s.trim().is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                // Auto-selección inteligente basada en el caso de uso
+                match use_case {
+                    UseCase::Fast => "gpt-4o-mini".to_string(),
+                    UseCase::Deep => "gpt-4o".to_string(),
+                    _ => "gpt-4o-mini".to_string(), // Balanced por defecto
+                }
+            });
         
         // JSON MODE: OpenAI requiere 'json_object' y mencionar "JSON" en el system prompt
         let system_msg = "You are a helpful assistant designed to output JSON.";
@@ -122,13 +129,17 @@ impl AnalyzerAgent {
         self.check_budget()?;
         let url = format!("{}/v1/messages", base.trim_end_matches('/'));
         
-        let m = model.clone().unwrap_or_else(|| {
-             match use_case {
-                UseCase::Fast => "claude-3-haiku-20240307".to_string(), 
-                UseCase::Deep => "claude-3-opus-20240229".to_string(),
-                _ => "claude-3-5-sonnet-20240620".to_string(), 
-            }
-        });
+        // CORRECCIÓN PRINCIPAL TAMBIÉN AQUÍ:
+        let m = model.as_deref()
+            .filter(|s| *s != "auto" && !s.trim().is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                 match use_case {
+                    UseCase::Fast => "claude-3-haiku-20240307".to_string(), 
+                    UseCase::Deep => "claude-3-opus-20240229".to_string(),
+                    _ => "claude-3-5-sonnet-20240620".to_string(), 
+                }
+            });
 
         // JSON MODE (Hack para Anthropic): Prefill del asistente con "{"
         let body = serde_json::json!({
